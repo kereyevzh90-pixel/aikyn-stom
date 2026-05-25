@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readConfig, writeConfig } from '@/lib/storage';
 
 export async function GET() {
-  const config = readConfig();
+  const config = await readConfig();
   return NextResponse.json(config);
 }
 
@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    writeConfig(body);
+    await writeConfig(body);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
