@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
 
     const faqHit = findFaq(lastUserMsg, config.faq);
 
-    let systemText = config.systemPrompt;
+    let systemText = `ВАЖНО: Отвечай ТОЛЬКО финальным ответом. Никогда не пиши свои мысли, рассуждения, анализ или план ответа. Сразу пиши ответ клиенту.\n\n${config.systemPrompt}`;
     systemText += `\n\nДанные клиники:\n- Название: ${config.clinicName}\n- Город: ${config.city}\n- Адрес: ${config.address}\n- Телефон: ${config.phone}\n- График: ${config.schedule}`;
 
     if (faqHit) {
