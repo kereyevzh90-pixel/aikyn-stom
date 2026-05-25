@@ -37,33 +37,27 @@ export async function POST(req: NextRequest) {
       try {
         const today = new Date().toISOString().split('T')[0];
         const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
-        const [todayRes, tomorrowRes] = await Promise.all([
-          fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL ? `https://${new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname}` : ''}/api/calendar?date=${today}`).catch(() => null),
-          fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL ? `https://${new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname}` : ''}/api/calendar?date=${tomorrow}`).catch(() => null),
+        const [{ data: doctors }, { data: slots }, { data: appts }] = await Promise.all([
+          supabase.from('doctors').select('id, name, specialization'),
+          supabase.from('doctor_schedules').select('doctor_id, date, time_slot, is_blocked').in('date', [today, tomorrow]).order('date').order('time_slot'),
+          supabase.from('appointments').select('doctor_id, date, time_slot').in('date', [today, tomorrow]).neq('status', 'cancelled'),
         ]);
-        // Use supabase directly instead
-        const { supabase: sb } = await import('@/lib/supabase');
-        const { data: doctors } = await sb.from('doctors').select('id, name, specialization');
-        const { data: slots } = await sb.from('doctor_schedules').select('doctor_id, date, time_slot, is_blocked').in('date', [today, tomorrow]).order('date').order('time_slot');
-        const { data: appts } = await sb.from('appointments').select('doctor_id, date, time_slot').in('date', [today, tomorrow]).neq('status', 'cancelled');
-
         if (doctors && doctors.length > 0) {
-          const bookedSet = new Set((appts ?? []).map(a => `${a.doctor_id}_${a.date}_${a.time_slot}`));
+          const bookedSet = new Set((appts ?? []).map((a: { doctor_id: string; date: string; time_slot: string }) => `${a.doctor_id}_${a.date}_${a.time_slot}`));
           let schedInfo = '\n\nРАСПИСАНИЕ КЛИНИКИ (актуальное):';
           for (const doc of doctors) {
-            const docSlots = (slots ?? []).filter(s => s.doctor_id === doc.id && !s.is_blocked);
-            const freeSlots = docSlots.filter(s => !bookedSet.has(`${s.doctor_id}_${s.date}_${s.time_slot}`));
+            const freeSlots = (slots ?? []).filter((s: { doctor_id: string; date: string; time_slot: string; is_blocked: boolean }) => s.doctor_id === doc.id && !s.is_blocked && !bookedSet.has(`${s.doctor_id}_${s.date}_${s.time_slot}`));
             if (freeSlots.length === 0) {
-              schedInfo += `\n- ${doc.name} (${doc.specialization}): нет свободных мест на ближайшие дни`;
+              schedInfo += `\n- ${doc.name} (${doc.specialization}): нет свободных мест`;
             } else {
               const byDate: Record<string, string[]> = {};
               for (const s of freeSlots) { if (!byDate[s.date]) byDate[s.date] = []; byDate[s.date].push(s.time_slot); }
-              schedInfo += `\n- ${doc.name} (${doc.specialization}): свободно — ` + Object.entries(byDate).map(([d, times]) => `${d}: ${times.join(', ')}`).join('; ');
+              schedInfo += `\n- ${doc.name} (${doc.specialization}): ` + Object.entries(byDate).map(([d, times]) => `${d}: ${times.join(', ')}`).join('; ');
             }
           }
           systemText += schedInfo;
         }
-      } catch { /* ignore schedule errors */ }
+      } catch { /* ignore */ }
     }
 
     const apiKey = process.env.OPENROUTER_API_KEY;
