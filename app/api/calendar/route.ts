@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     apptMap[`${a.doctor_id}_${a.time_slot}`] = { user_name: a.user_name, user_phone: a.user_phone, service: a.service };
   }
 
-  const allTimes = [...new Set((slots ?? []).map(s => s.time_slot))].sort();
+  const allTimes = Array.from(new Set((slots ?? []).map(s => s.time_slot))).sort();
 
   const grid: Record<string, Record<string, { status: 'free' | 'booked' | 'blocked'; patient?: { name: string; phone: string; service: string } }>> = {};
   for (const time of allTimes) {
