@@ -31,6 +31,41 @@ export async function POST(req: NextRequest) {
       systemText += `\n\n[ВАЖНО: На этот вопрос есть готовый ответ клиники. Используй именно его как основу]\nОтвет: ${faqHit}`;
     }
 
+    // Fetch schedule if user asks about availability
+    const scheduleKeywords = ['свободн', 'занят', 'расписан', 'запис', 'время', 'слот', 'прием', 'приём', 'когда', 'сегодня', 'завтра', 'доктор', 'врач'];
+    if (scheduleKeywords.some(k => lastUserMsg.toLowerCase().includes(k))) {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+        const [todayRes, tomorrowRes] = await Promise.all([
+          fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL ? `https://${new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname}` : ''}/api/calendar?date=${today}`).catch(() => null),
+          fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL ? `https://${new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname}` : ''}/api/calendar?date=${tomorrow}`).catch(() => null),
+        ]);
+        // Use supabase directly instead
+        const { supabase: sb } = await import('@/lib/supabase');
+        const { data: doctors } = await sb.from('doctors').select('id, name, specialization');
+        const { data: slots } = await sb.from('doctor_schedules').select('doctor_id, date, time_slot, is_blocked').in('date', [today, tomorrow]).order('date').order('time_slot');
+        const { data: appts } = await sb.from('appointments').select('doctor_id, date, time_slot').in('date', [today, tomorrow]).neq('status', 'cancelled');
+
+        if (doctors && doctors.length > 0) {
+          const bookedSet = new Set((appts ?? []).map(a => `${a.doctor_id}_${a.date}_${a.time_slot}`));
+          let schedInfo = '\n\nРАСПИСАНИЕ КЛИНИКИ (актуальное):';
+          for (const doc of doctors) {
+            const docSlots = (slots ?? []).filter(s => s.doctor_id === doc.id && !s.is_blocked);
+            const freeSlots = docSlots.filter(s => !bookedSet.has(`${s.doctor_id}_${s.date}_${s.time_slot}`));
+            if (freeSlots.length === 0) {
+              schedInfo += `\n- ${doc.name} (${doc.specialization}): нет свободных мест на ближайшие дни`;
+            } else {
+              const byDate: Record<string, string[]> = {};
+              for (const s of freeSlots) { if (!byDate[s.date]) byDate[s.date] = []; byDate[s.date].push(s.time_slot); }
+              schedInfo += `\n- ${doc.name} (${doc.specialization}): свободно — ` + Object.entries(byDate).map(([d, times]) => `${d}: ${times.join(', ')}`).join('; ');
+            }
+          }
+          systemText += schedInfo;
+        }
+      } catch { /* ignore schedule errors */ }
+    }
+
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
       return NextResponse.json({ text: 'OPENROUTER_API_KEY не задан. Добавьте его в переменные окружения.' });

@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { ClinicConfig, FaqItem } from '@/types/config';
 
-const TABS = ['FAQ ответы', 'Системный промпт', 'Настройки', 'Записи', 'Врачи', 'Чаты'] as const;
+const TABS = ['FAQ ответы', 'Системный промпт', 'Настройки', 'Записи', 'Врачи', 'Календарь', 'Чаты'] as const;
 type Tab = typeof TABS[number];
 
 const EMPTY_CONFIG: ClinicConfig = { clinicName: '', city: '', address: '', phone: '', schedule: '', systemPrompt: '', faq: [] };
@@ -50,6 +50,30 @@ export default function AdminPage() {
   const [doctorLoading, setDoctorLoading] = useState(false);
   const [editingDoctor, setEditingDoctor] = useState<Partial<Doctor> | null>(null);
   const [addingDoctor, setAddingDoctor] = useState(false);
+
+  // Calendar
+  type CalSlot = { status: 'free' | 'booked' | 'blocked'; patient?: { name: string; phone: string; service: string } };
+  type CalGrid = Record<string, Record<string, CalSlot>>;
+  type CalDoctor = { id: string; name: string; specialization: string };
+  const [calDate, setCalDate] = useState(new Date().toISOString().split('T')[0]);
+  const [calDoctors, setCalDoctors] = useState<CalDoctor[]>([]);
+  const [calTimes, setCalTimes] = useState<string[]>([]);
+  const [calGrid, setCalGrid] = useState<CalGrid>({});
+  const [calLoading, setCalLoading] = useState(false);
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; data: CalSlot['patient'] } | null>(null);
+
+  const loadCalendar = useCallback(async (date: string) => {
+    setCalLoading(true);
+    try {
+      const res = await fetch(`/api/calendar?date=${date}`);
+      const data = await res.json();
+      setCalDoctors(data.doctors ?? []);
+      setCalTimes(data.times ?? []);
+      setCalGrid(data.grid ?? {});
+    } finally { setCalLoading(false); }
+  }, []);
+
+  useEffect(() => { if (tab === 'Календарь') loadCalendar(calDate); }, [tab, calDate, loadCalendar]);
 
   // Chats
   type ChatMsg = { role: string; content: string };
@@ -497,6 +521,86 @@ export default function AdminPage() {
             </div>
 
             {!doctorLoading && doctors.length === 0 && <p className="text-gray-400 text-sm text-center py-8">Врачей ещё нет. Добавьте первого.</p>}
+          </div>
+        )}
+
+        {/* ── КАЛЕНДАРЬ ── */}
+        {tab === 'Календарь' && (
+          <div>
+            <div className="flex items-center gap-3 mb-5">
+              <input type="date" value={calDate} onChange={e => setCalDate(e.target.value)}
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400" />
+              <button onClick={() => setCalDate(new Date().toISOString().split('T')[0])}
+                className="text-sm text-blue-600 border border-blue-200 px-3 py-2 rounded-lg hover:bg-blue-50">Сегодня</button>
+              <button onClick={() => loadCalendar(calDate)}
+                className="text-sm text-gray-500 border border-gray-200 px-3 py-2 rounded-lg hover:bg-gray-50">Обновить</button>
+            </div>
+
+            {calLoading && <p className="text-gray-400 text-sm text-center py-12">Загрузка...</p>}
+
+            {!calLoading && calDoctors.length === 0 && (
+              <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center">
+                <p className="text-gray-400 text-sm">Нет врачей или слотов на эту дату.</p>
+                <p className="text-gray-400 text-xs mt-1">Добавьте врачей и создайте слоты во вкладке «Врачи».</p>
+              </div>
+            )}
+
+            {!calLoading && calDoctors.length > 0 && (
+              <div className="relative bg-white rounded-2xl border border-gray-100 overflow-auto">
+                <table className="text-sm border-collapse min-w-full">
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 bg-gray-50 z-10 px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide border-b border-r border-gray-100 w-20 min-w-[80px]">Время</th>
+                      {calDoctors.map(doc => (
+                        <th key={doc.id} className="px-3 py-3 border-b border-gray-100 min-w-[140px]">
+                          <p className="font-bold text-gray-900 text-sm">{doc.name}</p>
+                          <p className="text-xs text-gray-400 font-normal">{doc.specialization}</p>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {calTimes.map((time, ti) => (
+                      <tr key={time} className={ti % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}>
+                        <td className="sticky left-0 bg-inherit z-10 px-4 py-2 text-xs font-semibold text-gray-500 border-r border-gray-100 text-center">{time}</td>
+                        {calDoctors.map(doc => {
+                          const cell = calGrid[time]?.[doc.id];
+                          if (!cell) return <td key={doc.id} className="px-3 py-2 border-r border-gray-50 last:border-r-0" />;
+                          const bg = cell.status === 'booked' ? 'bg-red-100 border-red-200 text-red-700' : cell.status === 'blocked' ? 'bg-gray-100 border-gray-200 text-gray-400' : 'bg-green-100 border-green-200 text-green-700';
+                          return (
+                            <td key={doc.id} className="px-3 py-2 border-r border-gray-50 last:border-r-0">
+                              <div
+                                className={`relative rounded-lg px-2 py-1.5 text-xs font-medium border cursor-default text-center ${bg}`}
+                                onMouseEnter={e => { if (cell.patient) { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setTooltip({ x: r.left, y: r.bottom + 6, data: cell.patient }); }}}
+                                onMouseLeave={() => setTooltip(null)}
+                              >
+                                {cell.status === 'booked' ? '● Занято' : cell.status === 'blocked' ? '— Закрыто' : '○ Свободно'}
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {/* Легенда */}
+                <div className="flex gap-4 px-4 py-3 border-t border-gray-100">
+                  <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-green-400 inline-block" /><span className="text-xs text-gray-500">Свободно</span></div>
+                  <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-red-400 inline-block" /><span className="text-xs text-gray-500">Занято (наведи для имени)</span></div>
+                  <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-gray-400 inline-block" /><span className="text-xs text-gray-500">Закрыто</span></div>
+                </div>
+              </div>
+            )}
+
+            {/* Tooltip */}
+            {tooltip && tooltip.data && (
+              <div className="fixed z-50 bg-gray-900 text-white text-xs rounded-xl px-3 py-2.5 shadow-xl pointer-events-none" style={{ left: tooltip.x, top: tooltip.y }}>
+                <p className="font-semibold">{tooltip.data.name}</p>
+                <p className="text-gray-300">{tooltip.data.phone}</p>
+                <p className="text-gray-400">{tooltip.data.service}</p>
+              </div>
+            )}
           </div>
         )}
 
