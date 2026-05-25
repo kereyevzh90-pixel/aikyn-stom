@@ -499,9 +499,9 @@ body {
   .services-tags span { font-size: 19px; }
 }
 
-/* ── IPAD ONLY ───────────────────────────────── */
-@media (min-width: 768px) and (max-width: 1024px) {
+/* ── IPAD / TABLET ───────────────────────────── */
+@media (min-width: 768px) and (max-width: 1366px) {
   .hero-card {
-    background-position: center 40%;
+    background-position: center top !important;
   }
 }
