@@ -451,13 +451,6 @@ body {
 }
 .modal-close:hover { background: rgba(0,0,0,0.15); }
 
-/* ── IPAD ONLY ───────────────────────────────── */
-@media (min-width: 768px) and (max-width: 1024px) {
-  .hero-card {
-    background-position: center 30%;
-  }
-}
-
 /* ── RESPONSIVE ──────────────────────────────── */
 @media (max-width: 900px) {
   .navbar__inner { padding: 0 20px; }
@@ -504,4 +497,11 @@ body {
 
   .services-tags { gap: 12px 18px; padding: 0 12px; }
   .services-tags span { font-size: 19px; }
+}
+
+/* ── IPAD ONLY ───────────────────────────────── */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .hero-card {
+    background-position: center 40%;
+  }
 }
