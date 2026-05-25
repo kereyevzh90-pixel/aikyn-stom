@@ -451,6 +451,13 @@ body {
 }
 .modal-close:hover { background: rgba(0,0,0,0.15); }
 
+/* ── IPAD ONLY ───────────────────────────────── */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .hero-card {
+    background-position: center 30%;
+  }
+}
+
 /* ── RESPONSIVE ──────────────────────────────── */
 @media (max-width: 900px) {
   .navbar__inner { padding: 0 20px; }
