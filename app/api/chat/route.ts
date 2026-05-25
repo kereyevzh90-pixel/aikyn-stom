@@ -37,9 +37,10 @@ export async function POST(req: NextRequest) {
     }
 
     const models = [
-      'google/gemini-2.0-flash-exp:free',
-      'deepseek/deepseek-chat:free',
-      'meta-llama/llama-3.3-70b-instruct:free',
+      'google/gemma-4-26b-a4b-it:free',
+      'google/gemma-4-31b-it:free',
+      'deepseek/deepseek-v4-flash:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
     ];
 
     const chatMessages = [
