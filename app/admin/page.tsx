@@ -55,11 +55,15 @@ export default function AdminPage() {
   type CalSlot = { status: 'free' | 'booked' | 'blocked'; patient?: { name: string; phone: string; service: string } };
   type CalGrid = Record<string, Record<string, CalSlot>>;
   type CalDoctor = { id: string; name: string; specialization: string };
-  const [calDate, setCalDate] = useState(new Date().toISOString().split('T')[0]);
+  const now = new Date();
+  const [calYear, setCalYear] = useState(now.getFullYear());
+  const [calMonth, setCalMonth] = useState(now.getMonth());
+  const [calDate, setCalDate] = useState(now.toISOString().split('T')[0]);
   const [calDoctors, setCalDoctors] = useState<CalDoctor[]>([]);
   const [calTimes, setCalTimes] = useState<string[]>([]);
   const [calGrid, setCalGrid] = useState<CalGrid>({});
   const [calLoading, setCalLoading] = useState(false);
+  const [calMonthData, setCalMonthData] = useState<Record<string, 'free' | 'booked' | 'mixed' | 'none'>>({});
   const [tooltip, setTooltip] = useState<{ x: number; y: number; data: CalSlot['patient'] } | null>(null);
 
   const loadCalendar = useCallback(async (date: string) => {
@@ -73,7 +77,24 @@ export default function AdminPage() {
     } finally { setCalLoading(false); }
   }, []);
 
-  useEffect(() => { if (tab === 'Календарь') loadCalendar(calDate); }, [tab, calDate, loadCalendar]);
+  const loadMonthData = useCallback(async (year: number, month: number) => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const from = `${year}-${pad(month + 1)}-01`;
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    const to = `${year}-${pad(month + 1)}-${pad(lastDay)}`;
+    try {
+      const res = await fetch(`/api/calendar?from=${from}&to=${to}`);
+      const data = await res.json();
+      setCalMonthData(data.byDay ?? {});
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'Календарь') {
+      loadCalendar(calDate);
+      loadMonthData(calYear, calMonth);
+    }
+  }, [tab, calDate, calYear, calMonth, loadCalendar, loadMonthData]);
 
   // Chats
   type ChatMsg = { role: string; content: string };
@@ -525,116 +546,126 @@ export default function AdminPage() {
         )}
 
         {/* ── КАЛЕНДАРЬ ── */}
-        {tab === 'Календарь' && (
-          <div>
-            {/* Навигация */}
-            {(() => {
-              const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-              const WDAYS = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
-              const cur = new Date(calDate + 'T00:00:00');
-              const dow = (cur.getDay() + 6) % 7;
-              const weekStart = new Date(cur); weekStart.setDate(cur.getDate() - dow);
-              const weekDays = Array.from({length: 7}, (_, i) => { const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return d; });
-              const prevWeek = () => { const d = new Date(cur); d.setDate(d.getDate() - 7); setCalDate(d.toISOString().split('T')[0]); };
-              const nextWeek = () => { const d = new Date(cur); d.setDate(d.getDate() + 7); setCalDate(d.toISOString().split('T')[0]); };
-              const today = new Date().toISOString().split('T')[0];
-              return (
-                <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <button onClick={prevWeek} className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-500">‹</button>
-                    <div className="text-center">
-                      <span className="font-bold text-gray-900">{MONTHS[cur.getMonth()]} {cur.getFullYear()}</span>
-                    </div>
-                    <button onClick={nextWeek} className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-500">›</button>
-                  </div>
-                  <div className="grid grid-cols-7 gap-1">
-                    {weekDays.map((d, i) => {
-                      const ds = d.toISOString().split('T')[0];
-                      const isActive = ds === calDate;
-                      const isToday = ds === today;
-                      return (
-                        <button key={i} onClick={() => setCalDate(ds)}
-                          className={`flex flex-col items-center py-2 rounded-xl transition-colors ${isActive ? 'bg-blue-600 text-white' : isToday ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-50 text-gray-700'}`}>
-                          <span className={`text-xs mb-1 ${isActive ? 'text-blue-200' : 'text-gray-400'}`}>{WDAYS[i]}</span>
-                          <span className="font-semibold text-sm">{d.getDate()}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="flex justify-center mt-2">
-                    <button onClick={() => setCalDate(today)} className="text-xs text-blue-600 hover:underline">Сегодня</button>
-                  </div>
+        {tab === 'Календарь' && (() => {
+          const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+          const WDAYS = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+          const today = new Date().toISOString().split('T')[0];
+          const firstDay = new Date(calYear, calMonth, 1);
+          const startOffset = (firstDay.getDay() + 6) % 7;
+          const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+          const cells: (number | null)[] = [...Array(startOffset).fill(null), ...Array.from({length: daysInMonth}, (_, i) => i + 1)];
+          while (cells.length % 7 !== 0) cells.push(null);
+
+          const prevMonth = () => { if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); } else setCalMonth(m => m - 1); };
+          const nextMonth = () => { if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); } else setCalMonth(m => m + 1); };
+          const pad = (n: number) => String(n).padStart(2, '0');
+
+          return (
+            <div>
+              {/* Месячный календарь */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-5">
+                <div className="flex items-center justify-between mb-4">
+                  <button onClick={prevMonth} className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 hover:bg-gray-50 text-gray-600 text-lg">‹</button>
+                  <span className="font-bold text-gray-900 text-base">{MONTHS[calMonth]} {calYear}</span>
+                  <button onClick={nextMonth} className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 hover:bg-gray-50 text-gray-600 text-lg">›</button>
                 </div>
-              );
-            })()}
-
-            {calLoading && <p className="text-gray-400 text-sm text-center py-12">Загрузка...</p>}
-
-            {!calLoading && calDoctors.length === 0 && (
-              <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center">
-                <p className="text-gray-400 text-sm">Нет врачей или слотов на эту дату.</p>
-                <p className="text-gray-400 text-xs mt-1">Добавьте врачей и создайте слоты во вкладке «Врачи».</p>
+                <div className="grid grid-cols-7 gap-1 mb-2">
+                  {WDAYS.map(d => <div key={d} className="text-center text-xs font-semibold text-gray-400 py-1">{d}</div>)}
+                </div>
+                <div className="grid grid-cols-7 gap-1">
+                  {cells.map((day, i) => {
+                    if (!day) return <div key={i} />;
+                    const ds = `${calYear}-${pad(calMonth + 1)}-${pad(day)}`;
+                    const status = calMonthData[ds];
+                    const isSelected = ds === calDate;
+                    const isToday = ds === today;
+                    const bg = isSelected
+                      ? 'bg-blue-600 text-white'
+                      : status === 'booked' ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                      : status === 'mixed' ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                      : status === 'free' ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                      : isToday ? 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                      : 'hover:bg-gray-50 text-gray-700';
+                    return (
+                      <button key={i} onClick={() => { setCalDate(ds); loadCalendar(ds); }}
+                        className={`relative aspect-square flex flex-col items-center justify-center rounded-xl text-sm font-semibold transition-colors ${bg}`}>
+                        {day}
+                        {status && !isSelected && (
+                          <span className={`absolute bottom-1 w-1.5 h-1.5 rounded-full ${status === 'booked' ? 'bg-red-400' : status === 'mixed' ? 'bg-orange-400' : 'bg-green-400'}`} />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-4 mt-4 justify-center">
+                  <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-400 inline-block" /><span className="text-xs text-gray-500">Есть свободные</span></div>
+                  <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-orange-400 inline-block" /><span className="text-xs text-gray-500">Частично занято</span></div>
+                  <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-400 inline-block" /><span className="text-xs text-gray-500">Все занято</span></div>
+                </div>
               </div>
-            )}
 
-            {!calLoading && calDoctors.length > 0 && (
-              <div className="relative bg-white rounded-2xl border border-gray-100 overflow-auto">
-                <table className="text-sm border-collapse min-w-full">
-                  <thead>
-                    <tr>
-                      <th className="sticky left-0 bg-gray-50 z-10 px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide border-b border-r border-gray-100 w-20 min-w-[80px]">Время</th>
-                      {calDoctors.map(doc => (
-                        <th key={doc.id} className="px-3 py-3 border-b border-gray-100 min-w-[140px]">
-                          <p className="font-bold text-gray-900 text-sm">{doc.name}</p>
-                          <p className="text-xs text-gray-400 font-normal">{doc.specialization}</p>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {calTimes.map((time, ti) => (
-                      <tr key={time} className={ti % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}>
-                        <td className="sticky left-0 bg-inherit z-10 px-4 py-2 text-xs font-semibold text-gray-500 border-r border-gray-100 text-center">{time}</td>
-                        {calDoctors.map(doc => {
-                          const cell = calGrid[time]?.[doc.id];
-                          if (!cell) return <td key={doc.id} className="px-3 py-2 border-r border-gray-50 last:border-r-0" />;
-                          const bg = cell.status === 'booked' ? 'bg-red-100 border-red-200 text-red-700' : cell.status === 'blocked' ? 'bg-gray-100 border-gray-200 text-gray-400' : 'bg-green-100 border-green-200 text-green-700';
-                          return (
-                            <td key={doc.id} className="px-3 py-2 border-r border-gray-50 last:border-r-0">
-                              <div
-                                className={`relative rounded-lg px-2 py-1.5 text-xs font-medium border cursor-default text-center ${bg}`}
-                                onMouseEnter={e => { if (cell.patient) { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setTooltip({ x: r.left, y: r.bottom + 6, data: cell.patient }); }}}
-                                onMouseLeave={() => setTooltip(null)}
-                              >
-                                {cell.status === 'booked' ? '● Занято' : cell.status === 'blocked' ? '— Закрыто' : '○ Свободно'}
-                              </div>
-                            </td>
-                          );
-                        })}
+              {/* Детали дня */}
+              <div className="mb-3 flex items-center gap-2">
+                <span className="font-bold text-gray-900">{calDate}</span>
+                {calLoading && <span className="text-xs text-gray-400">Загрузка...</span>}
+              </div>
+
+              {!calLoading && calDoctors.length === 0 && (
+                <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
+                  <p className="text-gray-400 text-sm">Нет слотов на эту дату.</p>
+                  <p className="text-gray-400 text-xs mt-1">Создайте слоты во вкладке «Врачи».</p>
+                </div>
+              )}
+
+              {!calLoading && calDoctors.length > 0 && (
+                <div className="bg-white rounded-2xl border border-gray-100 overflow-auto">
+                  <table className="text-sm border-collapse min-w-full">
+                    <thead>
+                      <tr>
+                        <th className="sticky left-0 bg-gray-50 z-10 px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide border-b border-r border-gray-100 w-20">Время</th>
+                        {calDoctors.map(doc => (
+                          <th key={doc.id} className="px-3 py-3 border-b border-gray-100 min-w-[140px] text-left">
+                            <p className="font-bold text-gray-900 text-sm">{doc.name}</p>
+                            <p className="text-xs text-gray-400 font-normal">{doc.specialization}</p>
+                          </th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                {/* Легенда */}
-                <div className="flex gap-4 px-4 py-3 border-t border-gray-100">
-                  <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-green-400 inline-block" /><span className="text-xs text-gray-500">Свободно</span></div>
-                  <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-red-400 inline-block" /><span className="text-xs text-gray-500">Занято (наведи для имени)</span></div>
-                  <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-gray-400 inline-block" /><span className="text-xs text-gray-500">Закрыто</span></div>
+                    </thead>
+                    <tbody>
+                      {calTimes.map((time, ti) => (
+                        <tr key={time} className={ti % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}>
+                          <td className="sticky left-0 bg-inherit z-10 px-4 py-2 text-xs font-semibold text-gray-500 border-r border-gray-100 text-center">{time}</td>
+                          {calDoctors.map(doc => {
+                            const cell = calGrid[time]?.[doc.id];
+                            if (!cell) return <td key={doc.id} className="px-3 py-2 border-r border-gray-50 last:border-r-0" />;
+                            const bg = cell.status === 'booked' ? 'bg-red-100 border-red-200 text-red-700' : cell.status === 'blocked' ? 'bg-gray-100 border-gray-200 text-gray-400' : 'bg-green-100 border-green-200 text-green-700';
+                            return (
+                              <td key={doc.id} className="px-3 py-2 border-r border-gray-50 last:border-r-0">
+                                <div className={`rounded-lg px-2 py-1.5 text-xs font-medium border cursor-default text-center ${bg}`}
+                                  onMouseEnter={e => { if (cell.patient) { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setTooltip({ x: r.left, y: r.bottom + 6, data: cell.patient }); }}}
+                                  onMouseLeave={() => setTooltip(null)}>
+                                  {cell.status === 'booked' ? '● Занято' : cell.status === 'blocked' ? '— Закрыто' : '○ Свободно'}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Tooltip */}
-            {tooltip && tooltip.data && (
-              <div className="fixed z-50 bg-gray-900 text-white text-xs rounded-xl px-3 py-2.5 shadow-xl pointer-events-none" style={{ left: tooltip.x, top: tooltip.y }}>
-                <p className="font-semibold">{tooltip.data.name}</p>
-                <p className="text-gray-300">{tooltip.data.phone}</p>
-                <p className="text-gray-400">{tooltip.data.service}</p>
-              </div>
-            )}
-          </div>
-        )}
+              {tooltip && tooltip.data && (
+                <div className="fixed z-50 bg-gray-900 text-white text-xs rounded-xl px-3 py-2.5 shadow-xl pointer-events-none" style={{ left: tooltip.x, top: tooltip.y }}>
+                  <p className="font-semibold">{tooltip.data.name}</p>
+                  <p className="text-gray-300">{tooltip.data.phone}</p>
+                  <p className="text-gray-400">{tooltip.data.service}</p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── ЧАТЫ ── */}
         {tab === 'Чаты' && (

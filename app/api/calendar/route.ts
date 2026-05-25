@@ -3,12 +3,38 @@ import { supabase } from '@/lib/supabase';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const date = searchParams.get('date') ?? new Date().toISOString().split('T')[0];
+  const date = searchParams.get('date');
+  const from = searchParams.get('from');
+  const to = searchParams.get('to');
+
+  // Month overview mode
+  if (from && to) {
+    const [{ data: slots }, { data: appointments }] = await Promise.all([
+      supabase.from('doctor_schedules').select('date, is_blocked').gte('date', from).lte('date', to),
+      supabase.from('appointments').select('date').gte('date', from).lte('date', to).neq('status', 'cancelled'),
+    ]);
+
+    const bookedDays = new Set((appointments ?? []).map(a => a.date));
+    const slotDays = new Set((slots ?? []).filter(s => !s.is_blocked).map(s => s.date));
+    const byDay: Record<string, string> = {};
+
+    for (const d of Array.from(slotDays)) {
+      byDay[d] = bookedDays.has(d) ? 'mixed' : 'free';
+    }
+    for (const d of Array.from(bookedDays)) {
+      if (!slotDays.has(d)) byDay[d] = 'booked';
+    }
+
+    return NextResponse.json({ byDay });
+  }
+
+  // Day detail mode
+  const selectedDate = date ?? new Date().toISOString().split('T')[0];
 
   const [{ data: doctors }, { data: slots }, { data: appointments }] = await Promise.all([
     supabase.from('doctors').select('id, name, specialization').order('name'),
-    supabase.from('doctor_schedules').select('*').eq('date', date).order('time_slot'),
-    supabase.from('appointments').select('doctor_id, time_slot, user_name, user_phone, service, status').eq('date', date).neq('status', 'cancelled'),
+    supabase.from('doctor_schedules').select('*').eq('date', selectedDate).order('time_slot'),
+    supabase.from('appointments').select('doctor_id, time_slot, user_name, user_phone, service, status').eq('date', selectedDate).neq('status', 'cancelled'),
   ]);
 
   const apptMap: Record<string, { user_name: string; user_phone: string; service: string }> = {};
