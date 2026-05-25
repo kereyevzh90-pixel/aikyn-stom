@@ -527,14 +527,46 @@ export default function AdminPage() {
         {/* ── КАЛЕНДАРЬ ── */}
         {tab === 'Календарь' && (
           <div>
-            <div className="flex items-center gap-3 mb-5">
-              <input type="date" value={calDate} onChange={e => setCalDate(e.target.value)}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400" />
-              <button onClick={() => setCalDate(new Date().toISOString().split('T')[0])}
-                className="text-sm text-blue-600 border border-blue-200 px-3 py-2 rounded-lg hover:bg-blue-50">Сегодня</button>
-              <button onClick={() => loadCalendar(calDate)}
-                className="text-sm text-gray-500 border border-gray-200 px-3 py-2 rounded-lg hover:bg-gray-50">Обновить</button>
-            </div>
+            {/* Навигация */}
+            {(() => {
+              const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+              const WDAYS = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+              const cur = new Date(calDate + 'T00:00:00');
+              const dow = (cur.getDay() + 6) % 7;
+              const weekStart = new Date(cur); weekStart.setDate(cur.getDate() - dow);
+              const weekDays = Array.from({length: 7}, (_, i) => { const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return d; });
+              const prevWeek = () => { const d = new Date(cur); d.setDate(d.getDate() - 7); setCalDate(d.toISOString().split('T')[0]); };
+              const nextWeek = () => { const d = new Date(cur); d.setDate(d.getDate() + 7); setCalDate(d.toISOString().split('T')[0]); };
+              const today = new Date().toISOString().split('T')[0];
+              return (
+                <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <button onClick={prevWeek} className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-500">‹</button>
+                    <div className="text-center">
+                      <span className="font-bold text-gray-900">{MONTHS[cur.getMonth()]} {cur.getFullYear()}</span>
+                    </div>
+                    <button onClick={nextWeek} className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-500">›</button>
+                  </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {weekDays.map((d, i) => {
+                      const ds = d.toISOString().split('T')[0];
+                      const isActive = ds === calDate;
+                      const isToday = ds === today;
+                      return (
+                        <button key={i} onClick={() => setCalDate(ds)}
+                          className={`flex flex-col items-center py-2 rounded-xl transition-colors ${isActive ? 'bg-blue-600 text-white' : isToday ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-50 text-gray-700'}`}>
+                          <span className={`text-xs mb-1 ${isActive ? 'text-blue-200' : 'text-gray-400'}`}>{WDAYS[i]}</span>
+                          <span className="font-semibold text-sm">{d.getDate()}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex justify-center mt-2">
+                    <button onClick={() => setCalDate(today)} className="text-xs text-blue-600 hover:underline">Сегодня</button>
+                  </div>
+                </div>
+              );
+            })()}
 
             {calLoading && <p className="text-gray-400 text-sm text-center py-12">Загрузка...</p>}
 
