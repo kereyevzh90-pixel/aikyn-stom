@@ -91,6 +91,7 @@ export default function ChatWidget({ open, onClose }: { open: boolean; onClose: 
             const json = JSON.parse(line.slice(6));
             if (json.text) {
               accumulated += json.text;
+              setLoading(false);
               setMessages(prev => {
                 const updated = [...prev];
                 updated[updated.length - 1] = { role: 'assistant', content: accumulated };
