@@ -52,7 +52,6 @@ export default function ChatWidget({ open, onClose }: { open: boolean; onClose: 
     if (bookingStep === 'name') { handleName(text); return; }
     if (bookingStep === 'phone') { handlePhone(text); return; }
 
-    // Check local booking intent before calling API
     const isBooking = BOOKING_TRIGGERS.some(k => text.toLowerCase().includes(k));
     addUser(text);
 
@@ -63,17 +62,52 @@ export default function ChatWidget({ open, onClose }: { open: boolean; onClose: 
 
     const newMessages: Message[] = [...messages, { role: 'user', content: text }];
     setLoading(true);
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: newMessages }),
       });
-      const data = await res.json();
-      addBot(data.text || 'Не удалось получить ответ.');
-      if (data.booking_flow && bookingStep === 'idle') startBooking();
+
+      if (!res.body) throw new Error('no body');
+
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let accumulated = '';
+      let gotBookingFlow = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const json = JSON.parse(line.slice(6));
+            if (json.text) {
+              accumulated += json.text;
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { role: 'assistant', content: accumulated };
+                return updated;
+              });
+            }
+            if (json.done && json.booking_flow) gotBookingFlow = true;
+          } catch { /* ignore */ }
+        }
+      }
+
+      if (!accumulated) {
+        setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: 'Не удалось получить ответ.' }; return u; });
+      }
+      if (gotBookingFlow && bookingStep === 'idle') startBooking();
     } catch {
-      addBot('Ошибка соединения. Позвоните нам напрямую.');
+      setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: 'Ошибка соединения. Позвоните нам напрямую.' }; return u; });
     } finally {
       setLoading(false);
     }

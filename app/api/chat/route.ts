@@ -31,7 +31,6 @@ export async function POST(req: NextRequest) {
       systemText += `\n\n[ВАЖНО: На этот вопрос есть готовый ответ клиники. Используй именно его как основу]\nОтвет: ${faqHit}`;
     }
 
-    // Fetch schedule if user asks about availability
     const scheduleKeywords = ['свободн', 'занят', 'расписан', 'запис', 'время', 'слот', 'прием', 'приём', 'когда', 'сегодня', 'завтра', 'доктор', 'врач'];
     if (scheduleKeywords.some(k => lastUserMsg.toLowerCase().includes(k))) {
       try {
@@ -62,7 +61,7 @@ export async function POST(req: NextRequest) {
 
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ text: 'OPENROUTER_API_KEY не задан. Добавьте его в переменные окружения.' });
+      return NextResponse.json({ text: 'OPENROUTER_API_KEY не задан.' });
     }
 
     const models = [
@@ -74,20 +73,18 @@ export async function POST(req: NextRequest) {
 
     const chatMessages = [
       { role: 'system', content: systemText },
-      ...messages.map((m: { role: string; content: string }) => ({
-        role: m.role,
-        content: m.content,
-      })),
+      ...messages.map((m: { role: string; content: string }) => ({ role: m.role, content: m.content })),
     ];
 
-    let lastError = '';
-    for (const model of models) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
+    const bookingKeywords = ['записаться', 'запись', 'записать', 'прием', 'приём', 'прийти', 'попасть', 'свободно', 'окно', 'запишите', 'хочу к', 'когда можно'];
+    const bookingFlow = bookingKeywords.some(k => lastUserMsg.toLowerCase().includes(k));
 
-      let res: Response;
+    const encoder = new TextEncoder();
+
+    for (const model of models) {
+      let upstream: Response;
       try {
-        res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -95,42 +92,106 @@ export async function POST(req: NextRequest) {
             'HTTP-Referer': 'https://aikyn-stom.vercel.app',
             'X-Title': 'Aikyn Stom',
           },
-          body: JSON.stringify({ model, messages: chatMessages, max_tokens: 300, temperature: 0.5 }),
-          signal: controller.signal,
+          body: JSON.stringify({ model, messages: chatMessages, max_tokens: 400, temperature: 0.7, stream: true }),
         });
       } catch {
-        lastError = 'timeout';
-        continue;
-      } finally {
-        clearTimeout(timeout);
-      }
-
-      const data = await res.json();
-
-      if (!res.ok || data.error) {
-        lastError = data.error?.message ?? String(res.status);
         continue;
       }
 
-      let text = data.choices?.[0]?.message?.content ?? '';
-      if (!text) { lastError = 'Нет ответа'; continue; }
+      if (!upstream.ok || !upstream.body) continue;
 
-      // strip thinking tags from reasoning models
-      text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      const upstreamBody = upstream.body;
 
-      // save conversation to Supabase (fire and forget)
-      const allMessages = [...messages, { role: 'assistant', content: text }];
-      supabase.from('chats').insert({ messages: allMessages }).then(() => {});
+      const stream = new ReadableStream({
+        async start(ctrl) {
+          const reader = upstreamBody.getReader();
+          const dec = new TextDecoder();
+          let buf = '';
+          let fullText = '';
 
-      const bookingKeywords = ['записаться', 'запись', 'записать', 'прием', 'приём', 'прийти', 'попасть', 'свободно', 'окно', 'запишите', 'хочу к', 'когда можно'];
-      const bookingFlow = bookingKeywords.some(k => lastUserMsg.toLowerCase().includes(k));
+          // State for filtering <think>...</think>
+          let inThink = false;
+          let tagBuf = '';
 
-      return NextResponse.json({ text, booking_flow: bookingFlow });
+          function filterChunk(chunk: string): string {
+            let out = '';
+            for (const ch of chunk) {
+              if (inThink) {
+                tagBuf += ch;
+                if ('</think>'.startsWith(tagBuf)) {
+                  if (tagBuf === '</think>') { inThink = false; tagBuf = ''; }
+                } else {
+                  tagBuf = '';
+                }
+              } else {
+                const candidate = tagBuf + ch;
+                if ('<think>'.startsWith(candidate)) {
+                  tagBuf = candidate;
+                  if (tagBuf === '<think>') { inThink = true; tagBuf = ''; }
+                } else if (ch === '<') {
+                  out += tagBuf;
+                  tagBuf = '<';
+                } else {
+                  out += tagBuf + ch;
+                  tagBuf = '';
+                }
+              }
+            }
+            return out;
+          }
+
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buf += dec.decode(value, { stream: true });
+              const lines = buf.split('\n');
+              buf = lines.pop() ?? '';
+
+              for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const raw = line.slice(6).trim();
+                if (raw === '[DONE]') continue;
+                try {
+                  const json = JSON.parse(raw);
+                  const chunk = json.choices?.[0]?.delta?.content ?? '';
+                  if (!chunk) continue;
+                  fullText += chunk;
+                  const filtered = filterChunk(chunk);
+                  if (filtered) {
+                    ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ text: filtered })}\n\n`));
+                  }
+                } catch { /* ignore parse errors */ }
+              }
+            }
+
+            ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true, booking_flow: bookingFlow })}\n\n`));
+          } finally {
+            reader.releaseLock();
+            ctrl.close();
+            const clean = fullText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+            if (clean) {
+              supabase.from('chats').insert({ messages: [...messages, { role: 'assistant', content: clean }] }).then(() => {});
+            }
+          }
+        },
+      });
+
+      return new Response(stream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+      });
     }
 
-    return NextResponse.json({ text: 'Ошибка: ' + lastError });
+    return new Response(
+      `data: ${JSON.stringify({ text: 'Сервис временно недоступен. Позвоните нам напрямую.', done: true })}\n\n`,
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    );
 
   } catch (err) {
-    return NextResponse.json({ text: 'Ошибка сервера: ' + String(err) }, { status: 500 });
+    return new Response(
+      `data: ${JSON.stringify({ text: 'Ошибка сервера: ' + String(err), done: true })}\n\n`,
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    );
   }
 }
