@@ -90,26 +90,29 @@ export async function POST(req: NextRequest) {
 
     const encoder = new TextEncoder();
 
-    for (const model of models) {
-      let upstream: Response;
-      try {
-        upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-            'HTTP-Referer': 'https://aikyn-stom.vercel.app',
-            'X-Title': 'Aikyn Stom',
-          },
-          body: JSON.stringify({ model, messages: chatMessages, max_tokens: 400, temperature: 0.7, stream: true }),
-        });
-      } catch {
-        continue;
-      }
+    const tryModel = (model: string) =>
+      fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'HTTP-Referer': 'https://aikyn-stom.vercel.app',
+          'X-Title': 'Aikyn Stom',
+        },
+        body: JSON.stringify({ model, messages: chatMessages, max_tokens: 400, temperature: 0.7, stream: true }),
+      }).then(r => { if (!r.ok || !r.body) throw new Error(String(r.status)); return r; });
 
-      if (!upstream.ok || !upstream.body) continue;
+    let upstream: Response;
+    try {
+      upstream = await Promise.any(models.map(tryModel));
+    } catch {
+      return new Response(
+        `data: ${JSON.stringify({ text: 'Сервис временно недоступен. Позвоните нам напрямую.', done: true })}\n\n`,
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      );
+    }
 
-      const upstreamBody = upstream.body;
+    const upstreamBody = upstream.body!;
 
       const stream = new ReadableStream({
         async start(ctrl) {
@@ -187,15 +190,9 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      return new Response(stream, {
-        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
-      });
-    }
-
-    return new Response(
-      `data: ${JSON.stringify({ text: 'Сервис временно недоступен. Позвоните нам напрямую.', done: true })}\n\n`,
-      { headers: { 'Content-Type': 'text/event-stream' } },
-    );
+    return new Response(stream, {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+    });
 
   } catch (err) {
     return new Response(
