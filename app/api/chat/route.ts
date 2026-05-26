@@ -82,16 +82,28 @@ export async function POST(req: NextRequest) {
 
     let lastError = '';
     for (const model of models) {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'HTTP-Referer': 'https://aikyn-stom.vercel.app',
-          'X-Title': 'Aikyn Stom',
-        },
-        body: JSON.stringify({ model, messages: chatMessages, max_tokens: 400, temperature: 0.7 }),
-      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+
+      let res: Response;
+      try {
+        res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'HTTP-Referer': 'https://aikyn-stom.vercel.app',
+            'X-Title': 'Aikyn Stom',
+          },
+          body: JSON.stringify({ model, messages: chatMessages, max_tokens: 300, temperature: 0.5 }),
+          signal: controller.signal,
+        });
+      } catch {
+        lastError = 'timeout';
+        continue;
+      } finally {
+        clearTimeout(timeout);
+      }
 
       const data = await res.json();
 
