@@ -74,10 +74,10 @@ export async function POST(req: NextRequest) {
     }
 
     const models = [
-      'google/gemma-2-9b-it:free',
-      'meta-llama/llama-3.2-3b-instruct:free',
-      'meta-llama/llama-3.1-8b-instruct:free',
       'google/gemma-4-26b-a4b-it:free',
+      'google/gemma-4-31b-it:free',
+      'deepseek/deepseek-v4-flash:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
     ];
 
     const chatMessages = [
