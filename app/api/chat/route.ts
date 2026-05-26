@@ -118,46 +118,13 @@ export async function POST(req: NextRequest) {
           let buf = '';
           let fullText = '';
 
-          // State for filtering <think>...</think>
-          let inThink = false;
-          let tagBuf = '';
-
-          function filterChunk(chunk: string): string {
-            let out = '';
-            for (const ch of chunk) {
-              if (inThink) {
-                tagBuf += ch;
-                if ('</think>'.startsWith(tagBuf)) {
-                  if (tagBuf === '</think>') { inThink = false; tagBuf = ''; }
-                } else {
-                  tagBuf = '';
-                }
-              } else {
-                const candidate = tagBuf + ch;
-                if ('<think>'.startsWith(candidate)) {
-                  tagBuf = candidate;
-                  if (tagBuf === '<think>') { inThink = true; tagBuf = ''; }
-                } else if (ch === '<') {
-                  out += tagBuf;
-                  tagBuf = '<';
-                } else {
-                  out += tagBuf + ch;
-                  tagBuf = '';
-                }
-              }
-            }
-            return out;
-          }
-
           try {
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
-
               buf += dec.decode(value, { stream: true });
               const lines = buf.split('\n');
               buf = lines.pop() ?? '';
-
               for (const line of lines) {
                 if (!line.startsWith('data: ')) continue;
                 const raw = line.slice(6).trim();
@@ -165,24 +132,33 @@ export async function POST(req: NextRequest) {
                 try {
                   const json = JSON.parse(raw);
                   const chunk = json.choices?.[0]?.delta?.content ?? '';
-                  if (!chunk) continue;
-                  fullText += chunk;
-                  const filtered = filterChunk(chunk);
-                  if (filtered) {
-                    ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ text: filtered })}\n\n`));
-                  }
-                } catch { /* ignore parse errors */ }
+                  if (chunk) fullText += chunk;
+                } catch { /* ignore */ }
               }
             }
 
+            // Strip <think> blocks
+            let clean = fullText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+            // Keep only lines with majority Cyrillic chars (filters English reasoning)
+            const cyrillic = /[а-яёА-ЯЁ]/;
+            const latin = /[a-zA-Z]/;
+            const paragraphs = clean.split(/\n{2,}/);
+            const filtered = paragraphs.filter(p => {
+              const cyr = (p.match(/[а-яёА-ЯЁ]/g) ?? []).length;
+              const lat = (p.match(/[a-zA-Z]/g) ?? []).length;
+              return cyrillic.test(p) && cyr >= lat;
+            });
+            clean = (filtered.length > 0 ? filtered : paragraphs).join('\n\n').trim();
+
+            if (clean) {
+              ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ text: clean })}\n\n`));
+              supabase.from('chats').insert({ messages: [...messages, { role: 'assistant', content: clean }] }).then(() => {});
+            }
             ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true, booking_flow: bookingFlow })}\n\n`));
           } finally {
             reader.releaseLock();
             ctrl.close();
-            const clean = fullText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-            if (clean) {
-              supabase.from('chats').insert({ messages: [...messages, { role: 'assistant', content: clean }] }).then(() => {});
-            }
           }
         },
       });
