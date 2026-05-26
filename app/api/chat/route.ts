@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 
     const faqHit = findFaq(lastUserMsg, config.faq);
 
-    let systemText = `CRITICAL INSTRUCTION: Output ONLY the final answer to the user. Do NOT write your thoughts, reasoning, analysis, planning, or any internal monologue. Do NOT explain what you are doing. Start your response immediately with the answer itself.\nВАЖНО: Отвечай ТОЛЬКО финальным ответом на русском языке. Никогда не пиши мысли, рассуждения или анализ. Сразу пиши ответ.\n\n${config.systemPrompt}`;
+    let systemText = `CRITICAL: You MUST put your entire response inside <answer> tags. Example: <answer>Консультация стоит 5000₸.</answer>. You may think before, but the user will only see what is inside <answer></answer>.\n\n${config.systemPrompt}`;
     systemText += `\n\nДанные клиники:\n- Название: ${config.clinicName}\n- Город: ${config.city}\n- Адрес: ${config.address}\n- Телефон: ${config.phone}\n- График: ${config.schedule}`;
 
     if (faqHit) {
@@ -118,31 +118,32 @@ export async function POST(req: NextRequest) {
           let buf = '';
           let fullText = '';
 
-          // State for filtering <think>...</think>
-          let inThink = false;
+          // Only stream content inside <answer>...</answer>
+          let answerState: 'waiting' | 'inside' | 'done' = 'waiting';
           let tagBuf = '';
+          const OPEN_TAG = '<answer>';
+          const CLOSE_TAG = '</answer>';
 
           function filterChunk(chunk: string): string {
             let out = '';
             for (const ch of chunk) {
-              if (inThink) {
+              if (answerState === 'done') break;
+              if (answerState === 'waiting') {
                 tagBuf += ch;
-                if ('</think>'.startsWith(tagBuf)) {
-                  if (tagBuf === '</think>') { inThink = false; tagBuf = ''; }
+                if (OPEN_TAG.startsWith(tagBuf)) {
+                  if (tagBuf === OPEN_TAG) { answerState = 'inside'; tagBuf = ''; }
                 } else {
-                  tagBuf = '';
+                  tagBuf = ch === '<' ? '<' : '';
                 }
               } else {
-                const candidate = tagBuf + ch;
-                if ('<think>'.startsWith(candidate)) {
-                  tagBuf = candidate;
-                  if (tagBuf === '<think>') { inThink = true; tagBuf = ''; }
-                } else if (ch === '<') {
-                  out += tagBuf;
-                  tagBuf = '<';
-                } else {
-                  out += tagBuf + ch;
-                  tagBuf = '';
+                tagBuf += ch;
+                if (CLOSE_TAG.startsWith(tagBuf)) {
+                  if (tagBuf === CLOSE_TAG) { answerState = 'done'; tagBuf = ''; }
+                } else if (!CLOSE_TAG.startsWith(tagBuf)) {
+                  const flushed = tagBuf.slice(0, -1);
+                  out += flushed;
+                  tagBuf = ch === '<' ? '<' : '';
+                  if (!tagBuf) out += ch;
                 }
               }
             }
@@ -179,7 +180,8 @@ export async function POST(req: NextRequest) {
           } finally {
             reader.releaseLock();
             ctrl.close();
-            const clean = fullText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+            const answerMatch = fullText.match(/<answer>([\s\S]*?)<\/answer>/i);
+            const clean = answerMatch ? answerMatch[1].trim() : fullText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
             if (clean) {
               supabase.from('chats').insert({ messages: [...messages, { role: 'assistant', content: clean }] }).then(() => {});
             }
