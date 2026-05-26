@@ -3,6 +3,15 @@ import { readConfig } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import type { FaqItem } from '@/types/config';
 
+let configCache: Awaited<ReturnType<typeof readConfig>> | null = null;
+let configCachedAt = 0;
+async function getCachedConfig() {
+  if (configCache && Date.now() - configCachedAt < 60_000) return configCache;
+  configCache = await readConfig();
+  configCachedAt = Date.now();
+  return configCache;
+}
+
 function findFaq(question: string, faq: FaqItem[]): string | null {
   const q = question.toLowerCase();
   for (const item of faq) {
@@ -19,7 +28,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
     }
 
-    const config = await readConfig();
+    const config = await getCachedConfig();
     const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user')?.content ?? '';
 
     const faqHit = findFaq(lastUserMsg, config.faq);
