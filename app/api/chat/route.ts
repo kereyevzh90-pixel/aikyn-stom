@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 
     const faqHit = findFaq(lastUserMsg, config.faq);
 
-    let systemText = `ВАЖНО: Отвечай ТОЛЬКО финальным ответом. Никогда не пиши свои мысли, рассуждения, анализ или план ответа. Сразу пиши ответ клиенту.\n\n${config.systemPrompt}`;
+    let systemText = `CRITICAL INSTRUCTION: Output ONLY the final answer to the user. Do NOT write your thoughts, reasoning, analysis, planning, or any internal monologue. Do NOT explain what you are doing. Start your response immediately with the answer itself.\nВАЖНО: Отвечай ТОЛЬКО финальным ответом на русском языке. Никогда не пиши мысли, рассуждения или анализ. Сразу пиши ответ.\n\n${config.systemPrompt}`;
     systemText += `\n\nДанные клиники:\n- Название: ${config.clinicName}\n- Город: ${config.city}\n- Адрес: ${config.address}\n- Телефон: ${config.phone}\n- График: ${config.schedule}`;
 
     if (faqHit) {
