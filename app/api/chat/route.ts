@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 
     const faqHit = findFaq(lastUserMsg, config.faq);
 
-    let systemText = `CRITICAL INSTRUCTION: Output ONLY the final answer to the user. Do NOT write your thoughts, reasoning, analysis, planning, or any internal monologue. Do NOT explain what you are doing. Start your response immediately with the answer itself.\nВАЖНО: Отвечай ТОЛЬКО финальным ответом на русском языке. Никогда не пиши мысли, рассуждения или анализ. Сразу пиши ответ.\n\n${config.systemPrompt}`;
+    let systemText = `ВАЖНО: Отвечай ТОЛЬКО финальным ответом. Никогда не пиши свои мысли, рассуждения, анализ или план ответа. Сразу пиши ответ клиенту.\n\n${config.systemPrompt}`;
     systemText += `\n\nДанные клиники:\n- Название: ${config.clinicName}\n- Город: ${config.city}\n- Адрес: ${config.address}\n- Телефон: ${config.phone}\n- График: ${config.schedule}`;
 
     if (faqHit) {
@@ -85,13 +85,9 @@ export async function POST(req: NextRequest) {
       ...messages.map((m: { role: string; content: string }) => ({ role: m.role, content: m.content })),
     ];
 
-    const bookingKeywords = ['записаться', 'запись', 'записать', 'прием', 'приём', 'прийти', 'попасть', 'свободно', 'окно', 'запишите', 'хочу к', 'когда можно'];
-    const bookingFlow = bookingKeywords.some(k => lastUserMsg.toLowerCase().includes(k));
-
-    const encoder = new TextEncoder();
-
-    const tryModel = (model: string) =>
-      fetch('https://openrouter.ai/api/v1/chat/completions', {
+    let lastError = '';
+    for (const model of models) {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -99,105 +95,33 @@ export async function POST(req: NextRequest) {
           'HTTP-Referer': 'https://aikyn-stom.vercel.app',
           'X-Title': 'Aikyn Stom',
         },
-        body: JSON.stringify({ model, messages: chatMessages, max_tokens: 400, temperature: 0.7, stream: true }),
-      }).then(r => { if (!r.ok || !r.body) throw new Error(String(r.status)); return r; });
-
-    let upstream: Response;
-    try {
-      upstream = await Promise.any(models.map(tryModel));
-    } catch {
-      return new Response(
-        `data: ${JSON.stringify({ text: 'Сервис временно недоступен. Позвоните нам напрямую.', done: true })}\n\n`,
-        { headers: { 'Content-Type': 'text/event-stream' } },
-      );
-    }
-
-    const upstreamBody = upstream.body!;
-
-      const stream = new ReadableStream({
-        async start(ctrl) {
-          const reader = upstreamBody.getReader();
-          const dec = new TextDecoder();
-          let buf = '';
-          let fullText = '';
-
-          // State for filtering <think>...</think>
-          let inThink = false;
-          let tagBuf = '';
-
-          function filterChunk(chunk: string): string {
-            let out = '';
-            for (const ch of chunk) {
-              if (inThink) {
-                tagBuf += ch;
-                if ('</think>'.startsWith(tagBuf)) {
-                  if (tagBuf === '</think>') { inThink = false; tagBuf = ''; }
-                } else {
-                  tagBuf = '';
-                }
-              } else {
-                const candidate = tagBuf + ch;
-                if ('<think>'.startsWith(candidate)) {
-                  tagBuf = candidate;
-                  if (tagBuf === '<think>') { inThink = true; tagBuf = ''; }
-                } else if (ch === '<') {
-                  out += tagBuf;
-                  tagBuf = '<';
-                } else {
-                  out += tagBuf + ch;
-                  tagBuf = '';
-                }
-              }
-            }
-            return out;
-          }
-
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              buf += dec.decode(value, { stream: true });
-              const lines = buf.split('\n');
-              buf = lines.pop() ?? '';
-
-              for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                const raw = line.slice(6).trim();
-                if (raw === '[DONE]') continue;
-                try {
-                  const json = JSON.parse(raw);
-                  const chunk = json.choices?.[0]?.delta?.content ?? '';
-                  if (!chunk) continue;
-                  fullText += chunk;
-                  const filtered = filterChunk(chunk);
-                  if (filtered) {
-                    ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ text: filtered })}\n\n`));
-                  }
-                } catch { /* ignore parse errors */ }
-              }
-            }
-
-            ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true, booking_flow: bookingFlow })}\n\n`));
-          } finally {
-            reader.releaseLock();
-            ctrl.close();
-            const clean = fullText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-            if (clean) {
-              supabase.from('chats').insert({ messages: [...messages, { role: 'assistant', content: clean }] }).then(() => {});
-            }
-          }
-        },
+        body: JSON.stringify({ model, messages: chatMessages, max_tokens: 400, temperature: 0.7 }),
       });
 
-    return new Response(stream, {
-      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
-    });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        lastError = data.error?.message ?? String(res.status);
+        continue;
+      }
+
+      let text = data.choices?.[0]?.message?.content ?? '';
+      if (!text) { lastError = 'Нет ответа'; continue; }
+
+      text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+      const allMessages = [...messages, { role: 'assistant', content: text }];
+      supabase.from('chats').insert({ messages: allMessages }).then(() => {});
+
+      const bookingKeywords = ['записаться', 'запись', 'записать', 'прием', 'приём', 'прийти', 'попасть', 'свободно', 'окно', 'запишите', 'хочу к', 'когда можно'];
+      const bookingFlow = bookingKeywords.some(k => lastUserMsg.toLowerCase().includes(k));
+
+      return NextResponse.json({ text, booking_flow: bookingFlow });
+    }
+
+    return NextResponse.json({ text: 'Ошибка: ' + lastError });
 
   } catch (err) {
-    return new Response(
-      `data: ${JSON.stringify({ text: 'Ошибка сервера: ' + String(err), done: true })}\n\n`,
-      { headers: { 'Content-Type': 'text/event-stream' } },
-    );
+    return NextResponse.json({ text: 'Ошибка сервера: ' + String(err) }, { status: 500 });
   }
 }
