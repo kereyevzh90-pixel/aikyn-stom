@@ -22,14 +22,11 @@ function findFaq(question: string, faq: FaqItem[]): string | null {
 }
 
 function stripThinking(text: string): string {
-  // If model used "Possible response:" or "So," markers — take the quoted Russian part
-  const markerMatch = text.match(/(?:possible response|final response|so,)[^"«]*["«]([^"»\n]{5,})["»]/i);
-  if (markerMatch) {
-    const candidate = markerMatch[1].trim();
-    if ((candidate.match(/[а-яёА-ЯЁ]/g) || []).length > 3) return candidate;
-  }
+  // Extract [ОТВЕТ]...[/ОТВЕТ] tag
+  const tagMatch = text.match(/\[ОТВЕТ\]([\s\S]*?)\[\/ОТВЕТ\]/i);
+  if (tagMatch) return tagMatch[1].trim();
 
-  // Filter out English-dominant lines/paragraphs
+  // Fallback: strip <think> style and English-heavy lines
   const lines = text.split('\n');
   const filtered = lines.filter(line => {
     const t = line.trim();
@@ -38,9 +35,7 @@ function stripThinking(text: string): string {
     const lat = (t.match(/[a-zA-Z]/g) || []).length;
     return cyr > lat;
   });
-
-  const result = filtered.join('\n').trim();
-  return result || text.trim();
+  return filtered.join('\n').trim() || text.trim();
 }
 
 export async function POST(req: NextRequest) {
@@ -55,7 +50,7 @@ export async function POST(req: NextRequest) {
 
     const faqHit = findFaq(lastUserMsg, config.faq);
 
-    let systemText = `СТРОГО: Пиши ТОЛЬКО готовый ответ клиенту. ЗАПРЕЩЕНО: думать вслух, писать "Нужно уточнить", "Проверяю", "Формулирую", "Пример:", шаги рассуждений, внутренний анализ. Сразу финальный ответ — одним абзацем.\n\n${config.systemPrompt}`;
+    let systemText = `ФОРМАТ ОТВЕТА: Напиши свой ответ клиенту СТРОГО в теге: [ОТВЕТ]текст ответа[/ОТВЕТ]. Ничего кроме этого тега. Никаких рассуждений, анализа, проверок — только тег с готовым ответом.\n\n${config.systemPrompt}`;
     systemText += `\n\nДанные клиники:\n- Название: ${config.clinicName}\n- Город: ${config.city}\n- Адрес: ${config.address}\n- Телефон: ${config.phone}\n- График: ${config.schedule}`;
 
     if (faqHit) {
