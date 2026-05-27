@@ -197,8 +197,8 @@ export default function ChatWidget({ open, onClose }: { open: boolean; onClose: 
 
         {(loading || bookingLoading) && (
           <div className="flex justify-start">
-            <div className="bg-white px-4 py-3 rounded-2xl shadow-sm">
-              <div className="flex gap-1">{[0,1,2].map(i => <span key={i} className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />)}</div>
+            <div className="bg-white px-4 py-3 rounded-2xl shadow-sm text-sm text-gray-400 italic">
+              Печатает...
             </div>
           </div>
         )}
