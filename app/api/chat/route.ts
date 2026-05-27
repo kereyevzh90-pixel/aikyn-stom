@@ -21,6 +21,28 @@ function findFaq(question: string, faq: FaqItem[]): string | null {
   return null;
 }
 
+function stripThinking(text: string): string {
+  // If model used "Possible response:" or "So," markers — take the quoted Russian part
+  const markerMatch = text.match(/(?:possible response|final response|so,)[^"«]*["«]([^"»\n]{5,})["»]/i);
+  if (markerMatch) {
+    const candidate = markerMatch[1].trim();
+    if ((candidate.match(/[а-яёА-ЯЁ]/g) || []).length > 3) return candidate;
+  }
+
+  // Filter out English-dominant lines/paragraphs
+  const lines = text.split('\n');
+  const filtered = lines.filter(line => {
+    const t = line.trim();
+    if (!t) return true;
+    const cyr = (t.match(/[а-яёА-ЯЁ]/g) || []).length;
+    const lat = (t.match(/[a-zA-Z]/g) || []).length;
+    return cyr > lat;
+  });
+
+  const result = filtered.join('\n').trim();
+  return result || text.trim();
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { messages } = await req.json();
@@ -109,6 +131,7 @@ export async function POST(req: NextRequest) {
       if (!text) { lastError = 'Нет ответа'; continue; }
 
       text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      text = stripThinking(text);
 
       const allMessages = [...messages, { role: 'assistant', content: text }];
       supabase.from('chats').insert({ messages: allMessages }).then(() => {});
