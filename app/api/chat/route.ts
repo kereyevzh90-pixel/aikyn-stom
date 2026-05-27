@@ -137,7 +137,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ text, booking_flow: bookingFlow });
     }
 
-    return NextResponse.json({ text: 'Ошибка: ' + lastError });
+    const friendlyError = lastError.toLowerCase().includes('rate limit')
+      ? 'Ассистент временно недоступен. Пожалуйста, позвоните нам напрямую или напишите позже.'
+      : 'Ошибка: ' + lastError;
+    return NextResponse.json({ text: friendlyError });
 
   } catch (err) {
     return NextResponse.json({ text: 'Ошибка сервера: ' + String(err) }, { status: 500 });
