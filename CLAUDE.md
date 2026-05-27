@@ -29,11 +29,13 @@
 - `.env.local` не в git — переменные заданы в Vercel
 - Конфиг хранится в Supabase, не в файловой системе (Vercel read-only)
 - ИИ читает расписание напрямую из Supabase при вопросах о записи
-- Модели OpenRouter: gemma-4-26b, gemma-4-31b, deepseek-v4-flash, nemotron (fallback цепочка)
+- Модели OpenRouter: gemma-4-26b-a4b-it, gemma-4-31b-it, deepseek-v4-flash, nemotron-3-super-120b (fallback цепочка, все :free)
 - Конфиг кешируется в памяти на 60 сек (getCachedConfig) чтобы не делать лишний Supabase запрос
-- OpenRouter free tier: лимит запросов в день — при исчерпании ошибка "Rate limit exceeded: free-models-per-day"
+- OpenRouter free tier: лимит запросов в день — при исчерпании показывает "Ассистент временно недоступен..."
 - Чат НЕ использует стриминг — простой JSON ответ (NextResponse.json). Vercel hobby = 10сек таймаут
 - Бронирование обрабатывается локально во фронте (ChatWidget.tsx) без API при keyword-триггерах
+- ИИ мысли фильтруются: тег [ОТВЕТ]...[/ОТВЕТ] + удаление <think> блоков
+- Индикатор загрузки: текст "Печатает..." вместо точек
 - Изображения: IMG_0967.PNG (десктоп), IMG_0982.PNG (мобайл)
 - iPad fix: `center top !important` для 768-1366px
 
