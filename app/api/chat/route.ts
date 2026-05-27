@@ -22,8 +22,8 @@ function findFaq(question: string, faq: FaqItem[]): string | null {
 }
 
 function stripThinking(text: string): string {
-  // Extract [ОТВЕТ]...[/ОТВЕТ] tag
-  const tagMatch = text.match(/\[ОТВЕТ\]([\s\S]*?)\[\/ОТВЕТ\]/i);
+  // Extract [ОТВЕТ]...[/ОТВЕТ] or [ОТВЕТ]... without closing tag
+  const tagMatch = text.match(/\[ОТВЕТ\]([\s\S]*?)(?:\[\/ОТВЕТ\]|$)/i);
   if (tagMatch) return tagMatch[1].trim();
 
   // Fallback: strip <think> style and English-heavy lines
