@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 
     const faqHit = findFaq(lastUserMsg, config.faq);
 
-    let systemText = `ВАЖНО: Отвечай ТОЛЬКО финальным ответом. Никогда не пиши свои мысли, рассуждения, анализ или план ответа. Сразу пиши ответ клиенту.\n\n${config.systemPrompt}`;
+    let systemText = `СТРОГО: Пиши ТОЛЬКО готовый ответ клиенту. ЗАПРЕЩЕНО: думать вслух, писать "Нужно уточнить", "Проверяю", "Формулирую", "Пример:", шаги рассуждений, внутренний анализ. Сразу финальный ответ — одним абзацем.\n\n${config.systemPrompt}`;
     systemText += `\n\nДанные клиники:\n- Название: ${config.clinicName}\n- Город: ${config.city}\n- Адрес: ${config.address}\n- Телефон: ${config.phone}\n- График: ${config.schedule}`;
 
     if (faqHit) {
@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
           'HTTP-Referer': 'https://aikyn-stom.vercel.app',
           'X-Title': 'Aikyn Stom',
         },
-        body: JSON.stringify({ model, messages: chatMessages, max_tokens: 400, temperature: 0.7 }),
+        body: JSON.stringify({ model, messages: chatMessages, max_tokens: 400, temperature: 0.7, include_reasoning: false }),
       });
 
       const data = await res.json();
